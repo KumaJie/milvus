@@ -268,7 +268,6 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 					return err
 				}
 			} else if fileType == CSVFileExt {
-				log.Debug("import wrapper: find csv file")
 				err = p.parseRowBasedCSV(filePath, options.OnlyValidate)
 				if err != nil {
 					log.Warn("import wrapper: failed to parse row-based csv file", zap.Error(err), zap.String("filePath", filePath))

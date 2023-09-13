@@ -305,7 +305,6 @@ func (p *CSVParser) ParseRows(reader *IOReader, handle CSVRowHandler) error {
 			log.Warn("CSV Parser: failed to parse the field value", zap.Error(err))
 			return fmt.Errorf("failed to read the field value, error: %w", err)
 		}
-		log.Info("解析字段信息成功", zap.Strings("fieldsName", fieldsName))
 		p.fieldsName = fieldsName
 		// read buffer
 		buf := make([]map[storage.FieldID]string, 0, p.bufRowCount)

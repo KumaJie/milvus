@@ -18,14 +18,10 @@ package importutil
 
 import (
 	"context"
-	"fmt"
-	"math"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/gocarina/gocsv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -114,36 +110,20 @@ func Test_CSVParserParseRows_IntPK(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, parser)
 
-	// prepare test data
-	content := make([]sampleRow, 0)
-	for i := 0; i < 10; i++ {
-		row := sampleRow{
-			FieldBool:         i%2 == 0,
-			FieldInt8:         int8(i % math.MaxInt8),
-			FieldInt16:        int16(100 + i),
-			FieldInt32:        int32(1000 + i),
-			FieldInt64:        int64(99999999999999999 + i),
-			FieldFloat:        3 + float32(i)/11,
-			FieldDouble:       1 + float64(i)/7,
-			FieldString:       "No." + strconv.FormatInt(int64(i), 10),
-			FieldJSON:         fmt.Sprintf("{\"x\": %d}", i),
-			FieldBinaryVector: []int{(200 + i) % math.MaxUint8, 0},
-			FieldFloatVector:  []float32{float32(i) + 0.1, float32(i) + 0.2, float32(i) + 0.3, float32(i) + 0.4},
-		}
-		content = append(content, row)
-	}
-
-	strContent, err := gocsv.MarshalString(content)
-	assert.NoError(t, err)
-	reader := strings.NewReader(strContent)
-
 	consumer := &mockCSVRowConsumer{
 		handleErr:   nil,
 		rows:        make([]map[int64]string, 0),
 		handleCount: 0,
 	}
 
+	reader := strings.NewReader(
+		`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
+		true,10,101,1001,10001,3.14,1.56,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]"`)
+
 	t.Run("parse success", func(t *testing.T) {
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
+		assert.NoError(t, err)
+
 		// empty file
 		reader = strings.NewReader(``)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(0)}, consumer)
@@ -157,11 +137,12 @@ func Test_CSVParserParseRows_IntPK(t *testing.T) {
 
 	t.Run("error cases", func(t *testing.T) {
 		// handler is nil
+		
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(0)}, nil)
 		assert.Error(t, err)
 
 		// the size of header not equal to value size
-		reader = strings.NewReader(
+		reader := strings.NewReader(
 			`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
 		0,100,1000,99999999999999999,3,1,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]"`)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
@@ -465,6 +446,8 @@ func Test_CSVParserVerifyRow(t *testing.T) {
 		_, err := parser.verifyRow(raw)
 		assert.Error(t, err)
 
+		// miss FieldDynamic
+		parser.fieldsName = []string{}
 		raw = []string{}
 		_, err = parser.verifyRow(raw)
 		assert.Error(t, err)

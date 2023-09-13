@@ -178,12 +178,6 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				if value, ok := obj.(bool); ok {
 					field.(*storage.BoolFieldData).Data = append(field.(*storage.BoolFieldData).Data, value)
-				} else if str, ok := obj.(string); ok {
-					var value bool
-					if err := json.Unmarshal([]byte(str), &value); err != nil {
-						return err
-					}
-					field.(*storage.BoolFieldData).Data = append(field.(*storage.BoolFieldData).Data, value)
 				} else {
 					return fmt.Errorf("illegal value '%v' for bool type field '%s'", obj, schema.GetName())
 				}
@@ -192,11 +186,6 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			}
 		case schemapb.DataType_Float:
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				// csv parser will parse string type field
-				if num, ok := obj.(string); ok {
-					obj = json.Number(num)
-				}
-				
 				if num, ok := obj.(json.Number); ok {
 					value, err := parseFloat(string(num), 32, schema.GetName())
 					if err != nil {
@@ -211,11 +200,6 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			}
 		case schemapb.DataType_Double:
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				// csv parser will parse string type field, the convert process same as json.Number
-				if num, ok := obj.(string); ok {
-					obj = json.Number(num)
-				}
-
 				if num, ok := obj.(json.Number); ok {
 					value, err := parseFloat(string(num), 64, schema.GetName())
 					if err != nil {
@@ -229,11 +213,6 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			}
 		case schemapb.DataType_Int8:
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				// csv parser will parse string type field, the convert process same as json.Number
-				if num, ok := obj.(string); ok {
-					obj = json.Number(num)
-				}
-
 				if num, ok := obj.(json.Number); ok {
 					value, err := strconv.ParseInt(string(num), 0, 8)
 					if err != nil {
@@ -247,11 +226,6 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			}
 		case schemapb.DataType_Int16:
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				// csv parser will parse string type field, the convert process same as json.Number
-				if num, ok := obj.(string); ok {
-					obj = json.Number(num)
-				}
-
 				if num, ok := obj.(json.Number); ok {
 					value, err := strconv.ParseInt(string(num), 0, 16)
 					if err != nil {
@@ -265,11 +239,6 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			}
 		case schemapb.DataType_Int32:
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				// csv parser will parse string type field, the convert process same as json.Number
-				if num, ok := obj.(string); ok {
-					obj = json.Number(num)
-				}
-				
 				if num, ok := obj.(json.Number); ok {
 					value, err := strconv.ParseInt(string(num), 0, 32)
 					if err != nil {
@@ -283,11 +252,6 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			}
 		case schemapb.DataType_Int64:
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				// csv parser will parse string type field, the convert process same as json.Number
-				if num, ok := obj.(string); ok {
-					obj = json.Number(num)
-				}
-
 				if num, ok := obj.(json.Number); ok {
 					value, err := strconv.ParseInt(string(num), 0, 64)
 					if err != nil {
@@ -307,18 +271,11 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			validators[schema.GetFieldID()].dimension = dim
 
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				var arr []interface{}
-
-				if value, ok := obj.(string); ok {
-					desc := json.NewDecoder(strings.NewReader(value))
-					desc.UseNumber()
-					if err := desc.Decode(&arr); err != nil {
-						return fmt.Errorf("'%v' is not an array for binary vector field '%s'", obj, schema.GetName())
-					}
-				} else if arr, ok = obj.([]interface{}); !ok {
+				arr, ok := obj.([]interface{})
+				if !ok {
 					return fmt.Errorf("'%v' is not an array for binary vector field '%s'", obj, schema.GetName())
-				} 
-				
+				}
+
 				// we use uint8 to represent binary vector in json file, each uint8 value represents 8 dimensions.
 				if len(arr)*8 != dim {
 					return fmt.Errorf("bit size %d doesn't equal to vector dimension %d of field '%s'", len(arr)*8, dim, schema.GetName())
@@ -346,18 +303,9 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			validators[schema.GetFieldID()].dimension = dim
 
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				var arr []interface{}
-				
-				if value, ok := obj.(string); ok {
-					// like "[1.5, 2.6]"
-					desc := json.NewDecoder(strings.NewReader(value))
-					desc.UseNumber()
-					if err := desc.Decode(&arr); err != nil {
-						return fmt.Errorf("'%v' is not an array for float vector field '%s'", obj, schema.GetName())
-					}
-				} else if arr, ok = obj.([]interface{}); !ok {
+				arr, ok := obj.([]interface{})
+				if !ok {
 					return fmt.Errorf("'%v' is not an array for float vector field '%s'", obj, schema.GetName())
-
 				}
 
 				if len(arr) != dim {
@@ -395,11 +343,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				// user can write JSON content as {"FieldJSON": "{\"x\": 8}"} or {"FieldJSON": {"x": 8}}
 				if value, ok := obj.(string); ok {
 					var dummy interface{}
-					desc := json.NewDecoder(strings.NewReader(value))
-					desc.UseNumber()
-					err :=desc.Decode(&dummy)
-
-					//err := json.Unmarshal([]byte(value), &dummy)
+					err := json.Unmarshal([]byte(value), &dummy)
 					if err != nil {
 						return fmt.Errorf("failed to parse value '%v' for JSON field '%s', error: %w", value, schema.GetName(), err)
 					}

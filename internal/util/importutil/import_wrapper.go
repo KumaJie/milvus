@@ -38,7 +38,7 @@ import (
 const (
 	JSONFileExt  = ".json"
 	NumpyFileExt = ".npy"
-	CSVFileExt = ".csv"
+	CSVFileExt   = ".csv"
 
 	// supposed size of a single block, to control a binlog file size, the max biglog file size is no more than 2*SingleBlockSize
 	SingleBlockSize = 16 * 1024 * 1024 // 16MB
@@ -176,7 +176,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		name, fileType := GetFileNameAndExt(filePath)
 
 		// only allow json file, numpy file and csv file
-		if fileType != JSONFileExt && fileType != NumpyFileExt && fileType != CSVFileExt{
+		if fileType != JSONFileExt && fileType != NumpyFileExt && fileType != CSVFileExt {
 			log.Warn("import wrapper: unsupported file type", zap.String("filePath", filePath))
 			return false, fmt.Errorf("unsupported file type: '%s'", filePath)
 		}
@@ -189,7 +189,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		// check file type
 		// row-based support json type and csv type, column-based only support numpy type
 		if rowBased {
-			if fileType != JSONFileExt && fileType != CSVFileExt{
+			if fileType != JSONFileExt && fileType != CSVFileExt {
 				log.Warn("import wrapper: unsupported file type for row-based mode", zap.String("filePath", filePath))
 				return rowBased, fmt.Errorf("unsupported file type for row-based mode: '%s'", filePath)
 			}
@@ -272,6 +272,7 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 				err = p.parseRowBasedCSV(filePath, options.OnlyValidate)
 				if err != nil {
 					log.Warn("import wrapper: failed to parse row-based csv file", zap.Error(err), zap.String("filePath", filePath))
+					return err
 				}
 			}
 
@@ -464,7 +465,7 @@ func (p *ImportWrapper) parseRowBasedCSV(filePath string, onlyValidate bool) err
 	defer file.Close()
 
 	size, err := p.chunkManager.Size(p.ctx, filePath)
-	if  err != nil {
+	if err != nil {
 		return err
 	}
 	// csv parser
@@ -473,7 +474,7 @@ func (p *ImportWrapper) parseRowBasedCSV(filePath string, onlyValidate bool) err
 	if err != nil {
 		return err
 	}
-	
+
 	// if only validate, we input a empty flushFunc so that the consumer do nothing but only validation.
 	var flushFunc ImportFlushFunc
 	if onlyValidate {

@@ -399,7 +399,7 @@ func (m *importManager) isRowbased(files []string) (bool, error) {
 	isRowBased := false
 	for _, filePath := range files {
 		_, fileType := importutil.GetFileNameAndExt(filePath)
-		if fileType == importutil.JSONFileExt || fileType == importutil.CSVFileExt{
+		if fileType == importutil.JSONFileExt || fileType == importutil.CSVFileExt {
 			isRowBased = true
 		} else if isRowBased {
 			log.Error("row-based data file type must be JSON or CSV, mixed file types is not allowed", zap.Strings("files", files))

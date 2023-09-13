@@ -18,10 +18,14 @@ package importutil
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -45,7 +49,7 @@ type CSVRowConsumer struct {
 	blockSize      int64                          // maximum size of a read block(unit:byte)
 	autoIDRange    []int64                        // auto-generated id range, for example: [1, 10, 20, 25] means id from 1 to 10 and 20 to 25
 
-	callFlushFunc ImportFlushFunc // call back function to flush segment	
+	callFlushFunc ImportFlushFunc // call back function to flush segment
 }
 
 func NewCSVRowConsumer(ctx context.Context,
@@ -59,18 +63,18 @@ func NewCSVRowConsumer(ctx context.Context,
 	}
 
 	v := &CSVRowConsumer{
-		ctx: ctx,
+		ctx:            ctx,
 		collectionInfo: collectionInfo,
 		rowIDAllocator: idAlloc,
-		validators: make(map[storage.FieldID]*Validator, 0),
-		rowCounter: 0,
-		shardsData: make([]ShardData, 0, collectionInfo.ShardNum),
-		blockSize: blockSize,
-		autoIDRange: make([]int64, 0),
-		callFlushFunc: flushFunc,
+		validators:     make(map[storage.FieldID]*Validator, 0),
+		rowCounter:     0,
+		shardsData:     make([]ShardData, 0, collectionInfo.ShardNum),
+		blockSize:      blockSize,
+		autoIDRange:    make([]int64, 0),
+		callFlushFunc:  flushFunc,
 	}
-	
-	if err := initValidators(v.collectionInfo.Schema, v.validators); err != nil {
+
+	if err := v.initValidators(); err != nil {
 		log.Warn("CSV row consumer: fail to initialize csv row-based consumer", zap.Error(err))
 		return nil, fmt.Errorf("fail to initialize csv row-based consumer, error: %w", err)
 	}
@@ -90,15 +94,197 @@ func NewCSVRowConsumer(ctx context.Context,
 		return nil, errors.New("ID allocator is nil")
 	}
 
-
 	return v, nil
+}
+
+func (v *CSVRowConsumer) initValidators() error {
+	collectionSchema := v.collectionInfo.Schema
+	validators := v.validators
+	if collectionSchema == nil {
+		return errors.New("collection schema is nil")
+	}
+
+	for i := 0; i < len(collectionSchema.Fields); i++ {
+		schema := collectionSchema.Fields[i]
+
+		validators[schema.GetFieldID()] = &Validator{}
+		validators[schema.GetFieldID()].primaryKey = schema.GetIsPrimaryKey()
+		validators[schema.GetFieldID()].autoID = schema.GetAutoID()
+		validators[schema.GetFieldID()].fieldName = schema.GetName()
+		validators[schema.GetFieldID()].fieldID = schema.GetFieldID()
+		validators[schema.GetFieldID()].isString = false
+
+		switch schema.DataType {
+		// all obj is string type
+		case schemapb.DataType_Bool:
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				str := obj.(string)
+				var value bool
+				if err := json.Unmarshal([]byte(str), &value); err != nil {
+					return fmt.Errorf("illegal value '%v' for bool type field '%s'", str, schema.GetName())
+				}
+				field.(*storage.BoolFieldData).Data = append(field.(*storage.BoolFieldData).Data, value)
+				return nil
+			}
+		case schemapb.DataType_Float:
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				str := obj.(string)
+				value, err := parseFloat(str, 32, schema.GetName())
+				if err != nil {
+					return err
+				}
+				field.(*storage.FloatFieldData).Data = append(field.(*storage.FloatFieldData).Data, float32(value))
+				return nil
+			}
+		case schemapb.DataType_Double:
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				str := obj.(string)
+				value, err := parseFloat(str, 64, schema.GetName())
+				if err != nil {
+					return err
+				}
+				field.(*storage.DoubleFieldData).Data = append(field.(*storage.DoubleFieldData).Data, value)
+				return nil
+			}
+		case schemapb.DataType_Int8:
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				str := obj.(string)
+				value, err := strconv.ParseInt(str, 0, 8)
+				if err != nil {
+					return fmt.Errorf("failed to parse value '%v' for int8 field '%s', error: %w", str, schema.GetName(), err)
+				}
+				field.(*storage.Int8FieldData).Data = append(field.(*storage.Int8FieldData).Data, int8(value))
+				return nil
+			}
+		case schemapb.DataType_Int16:
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				str := obj.(string)
+				value, err := strconv.ParseInt(str, 0, 16)
+				if err != nil {
+					return fmt.Errorf("failed to parse value '%v' for int16 field '%s', error: %w", str, schema.GetName(), err)
+				}
+				field.(*storage.Int16FieldData).Data = append(field.(*storage.Int16FieldData).Data, int16(value))
+				return nil
+			}
+		case schemapb.DataType_Int32:
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				str := obj.(string)
+				value, err := strconv.ParseInt(str, 0, 32)
+				if err != nil {
+					return fmt.Errorf("failed to parse value '%v' for int32 field '%s', error: %w", str, schema.GetName(), err)
+				}
+				field.(*storage.Int32FieldData).Data = append(field.(*storage.Int32FieldData).Data, int32(value))
+				return nil
+			}
+		case schemapb.DataType_Int64:
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				str := obj.(string)
+				value, err := strconv.ParseInt(str, 0, 64)
+				if err != nil {
+					return fmt.Errorf("failed to parse value '%v' for int64 field '%s', error: %w", str, schema.GetName(), err)
+				}
+				field.(*storage.Int64FieldData).Data = append(field.(*storage.Int64FieldData).Data, value)
+				return nil
+			}
+		case schemapb.DataType_BinaryVector:
+			dim, err := getFieldDimension(schema)
+			if err != nil {
+				return err
+			}
+			validators[schema.GetFieldID()].dimension = dim
+
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				str := obj.(string)
+				var arr []interface{}
+				desc := json.NewDecoder(strings.NewReader(str))
+				desc.UseNumber()
+				if err := desc.Decode(&arr); err != nil {
+					return fmt.Errorf("'%v' is not an array for binary vector field '%s'", obj, schema.GetName())
+				}
+
+				// we use uint8 to represent binary vector in csv file, each uint8 value represents 8 dimensions.
+				if len(arr)*8 != dim {
+					return fmt.Errorf("bit size %d doesn't equal to vector dimension %d of field '%s'", len(arr)*8, dim, schema.GetName())
+				}
+
+				for i := 0; i < len(arr); i++ {
+					if num, ok := arr[i].(json.Number); ok {
+						value, err := strconv.ParseUint(string(num), 0, 8)
+						if err != nil {
+							return fmt.Errorf("failed to parse value '%v' for binary vector field '%s', error: %w", num, schema.GetName(), err)
+						}
+						field.(*storage.BinaryVectorFieldData).Data = append(field.(*storage.BinaryVectorFieldData).Data, byte(value))
+					} else {
+						return fmt.Errorf("illegal value '%v' for binary vector field '%s'", obj, schema.GetName())
+					}
+				}
+
+				return nil
+			}
+		case schemapb.DataType_FloatVector:
+			dim, err := getFieldDimension(schema)
+			if err != nil {
+				return err
+			}
+			validators[schema.GetFieldID()].dimension = dim
+
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				str := obj.(string)
+				var arr []interface{}
+				desc := json.NewDecoder(strings.NewReader(str))
+				desc.UseNumber()
+				if err := desc.Decode(&arr); err != nil {
+					return fmt.Errorf("'%v' is not an array for float vector field '%s'", obj, schema.GetName())
+				}
+
+				if len(arr) != dim {
+					return fmt.Errorf("array size %d doesn't equal to vector dimension %d of field '%s'", len(arr), dim, schema.GetName())
+				}
+
+				for i := 0; i < len(arr); i++ {
+					if num, ok := arr[i].(json.Number); ok {
+						value, err := parseFloat(string(num), 32, schema.GetName())
+						if err != nil {
+							return err
+						}
+						field.(*storage.FloatVectorFieldData).Data = append(field.(*storage.FloatVectorFieldData).Data, float32(value))
+					} else {
+						return fmt.Errorf("illegal value '%v' for float vector field '%s'", obj, schema.GetName())
+					}
+				}
+
+				return nil
+			}
+		case schemapb.DataType_String, schemapb.DataType_VarChar:
+			validators[schema.GetFieldID()].isString = true
+
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				value := obj.(string)
+				field.(*storage.StringFieldData).Data = append(field.(*storage.StringFieldData).Data, value)
+				return nil
+			}
+		case schemapb.DataType_JSON:
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				str := obj.(string)
+				var dummy interface{}
+				if err := json.Unmarshal([]byte(str), &dummy); err != nil {
+					return fmt.Errorf("failed to parse value '%v' for JSON field '%s', error: %w", str, schema.GetName(), err)
+				}
+				field.(*storage.JSONFieldData).Data = append(field.(*storage.JSONFieldData).Data, []byte(str))
+				return nil
+			}
+		default:
+			return fmt.Errorf("unsupport data type: %s", getTypeName(collectionSchema.Fields[i].DataType))
+		}
+	}
+	return nil
 }
 
 func (v *CSVRowConsumer) IDRange() []int64 {
 	return v.autoIDRange
 }
 
-func (v *CSVRowConsumer) RowCount()	int64 {
+func (v *CSVRowConsumer) RowCount() int64 {
 	return v.rowCounter
 }
 
@@ -157,7 +343,7 @@ func (v *CSVRowConsumer) Handle(rows []map[storage.FieldID]string) error {
 	for i := 0; i < len(rows); i++ {
 		row := rows[i]
 		rowNumber := v.rowCounter + int64(i)
-		
+
 		// hash to a shard number
 		var shardID uint32
 		var partitionID int64
@@ -191,7 +377,7 @@ func (v *CSVRowConsumer) Handle(rows []map[storage.FieldID]string) error {
 
 			hash, err := typeutil.Hash32Int64(pk)
 			if err != nil {
-				log.Warn("JSON row consumer: failed to hash primary key at the row",
+				log.Warn("CSV row consumer: failed to hash primary key at the row",
 					zap.Int64("key", pk), zap.Int64("rowNumber", rowNumber), zap.Error(err))
 				return fmt.Errorf("failed to hash primary key %d at the row %d, error: %w", pk, rowNumber, err)
 			}
@@ -207,7 +393,7 @@ func (v *CSVRowConsumer) Handle(rows []map[storage.FieldID]string) error {
 			pkArray.Data = append(pkArray.Data, pk)
 		}
 		rowIDField := v.shardsData[shardID][partitionID][common.RowIDField].(*storage.Int64FieldData)
-		rowIDField.Data = append(rowIDField.Data, rowIDBegin + int64(i))
+		rowIDField.Data = append(rowIDField.Data, rowIDBegin+int64(i))
 
 		for fieldID, validator := range v.validators {
 			if validator.primaryKey {
@@ -268,4 +454,3 @@ func (v *CSVRowConsumer) hashToPartition(row map[storage.FieldID]string, rowNumb
 	index := int64(hashValue % uint32(len(v.collectionInfo.PartitionIDs)))
 	return v.collectionInfo.PartitionIDs[index], nil
 }
-

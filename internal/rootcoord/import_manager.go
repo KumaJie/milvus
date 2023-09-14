@@ -459,7 +459,6 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		}
 
 		taskCount := 1
-		// column-based importing may contain more than one file
 		if isRowBased {
 			taskCount = len(req.Files)
 		}

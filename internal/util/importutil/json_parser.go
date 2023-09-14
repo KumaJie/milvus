@@ -113,7 +113,6 @@ func (p *JSONParser) combineDynamicRow(dynamicValues map[string]interface{}, row
 				desc := json.NewDecoder(strings.NewReader(value))
 				desc.UseNumber()
 				err := desc.Decode(&mp)
-				//err := json.Unmarshal([]byte(value), &mp)
 				if err != nil {
 					// invalid input
 					return errors.New("illegal value for dynamic field, not a JSON format string")

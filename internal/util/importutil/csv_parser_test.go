@@ -68,36 +68,36 @@ func Test_CSVParserAdjustBufSize(t *testing.T) {
 	assert.Greater(t, parser.bufRowCount, 0)
 }
 
-func Test_CSVParserTypeInference(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+// func Test_CSVParserTypeInference(t *testing.T) {
+// 	ctx, cancel := context.WithCancel(context.Background())
+// 	defer cancel()
 
-	schema := sampleSchema()
-	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
-	assert.NoError(t, err)
-	parser, err := NewCSVParser(ctx, collectionInfo, nil)
-	assert.NoError(t, err)
-	assert.NotNil(t, parser)
+// 	schema := sampleSchema()
+// 	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+// 	assert.NoError(t, err)
+// 	parser, err := NewCSVParser(ctx, collectionInfo, nil)
+// 	assert.NoError(t, err)
+// 	assert.NotNil(t, parser)
 
-	dynamicValues := map[string]string{
-		"number": "1234",
-		"string": "abcd",
-		"array":  "[1,2,3,4]",
-		"object": `{"x": 2}`,
-	}
-	// DynamicDataType is nil
-	err = parser.typeInference(dynamicValues)
-	assert.Error(t, err)
+// 	dynamicValues := map[string]string{
+// 		"number": "1234",
+// 		"string": "abcd",
+// 		"array":  "[1,2,3,4]",
+// 		"object": `{"x": 2}`,
+// 	}
+// 	// DynamicDataType is nil
+// 	err = parser.typeInference(dynamicValues)
+// 	assert.Error(t, err)
 
-	parser.dynamicDataType = make(map[string]DynamicDataType)
-	err = parser.typeInference(dynamicValues)
-	assert.NoError(t, err)
-	assert.Equal(t, parser.dynamicDataType["number"], NumberType)
-	assert.Equal(t, parser.dynamicDataType["string"], StringType)
-	assert.Equal(t, parser.dynamicDataType["array"], ArrayType)
-	assert.Equal(t, parser.dynamicDataType["object"], JSONType)
+// 	parser.dynamicDataType = make(map[string]DynamicDataType)
+// 	err = parser.typeInference(dynamicValues)
+// 	assert.NoError(t, err)
+// 	assert.Equal(t, parser.dynamicDataType["number"], NumberType)
+// 	assert.Equal(t, parser.dynamicDataType["string"], StringType)
+// 	assert.Equal(t, parser.dynamicDataType["array"], ArrayType)
+// 	assert.Equal(t, parser.dynamicDataType["object"], JSONType)
 
-}
+// }
 
 func Test_CSVParserParseRows_IntPK(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -137,11 +137,11 @@ func Test_CSVParserParseRows_IntPK(t *testing.T) {
 
 	t.Run("error cases", func(t *testing.T) {
 		// handler is nil
-		
+
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(0)}, nil)
 		assert.Error(t, err)
 
-		// the size of header not equal to value size
+		// csv parse error, fields len error
 		reader := strings.NewReader(
 			`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
 		0,100,1000,99999999999999999,3,1,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]"`)
@@ -224,7 +224,7 @@ func Test_CSVParserCombineDynamicRow(t *testing.T) {
 
 	t.Run("value combined for dynamic field", func(t *testing.T) {
 		dynamicValues := map[string]string{
-			"x": "8",
+			"x": "88",
 		}
 		row := map[storage.FieldID]string{
 			106: "1",
@@ -244,13 +244,6 @@ func Test_CSVParserCombineDynamicRow(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, row, int64(113))
 		assert.Contains(t, row[113], "x")
-
-		// dynamic field data tpye conflicting
-		dynamicValues = map[string]string{
-			"x": "abcd",
-		}
-		err = parser.combineDynamicRow(dynamicValues, row)
-		assert.Error(t, err)
 	})
 
 	t.Run("JSON format string/object for dynamic field", func(t *testing.T) {
@@ -309,12 +302,12 @@ func Test_CSVParserCombineDynamicRow(t *testing.T) {
 	})
 
 	t.Run("conflict input for dynamic field", func(t *testing.T) {
-		parser.dynamicDataType = map[string]DynamicDataType{
-			"x": NumberType,
-			"y": StringType,
-			"z": ArrayType,
-			"k": BoolType,
-		}
+		// parser.dynamicDataType = map[string]DynamicDataType{
+		// 	"x": NumberType,
+		// 	"y": StringType,
+		// 	"z": ArrayType,
+		// 	"k": BoolType,
+		// }
 
 		dynamicValues := map[string]string{
 			"x": "[1,2,3]",

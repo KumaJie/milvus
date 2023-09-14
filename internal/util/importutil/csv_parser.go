@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -32,25 +33,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// define dynamic field data type,
-
-type DynamicDataType int
-
-const (
-	NumberType DynamicDataType = 0
-	StringType DynamicDataType = 1
-	ArrayType  DynamicDataType = 2
-	BoolType   DynamicDataType = 3
-	JSONType   DynamicDataType = 4
-)
-
 type CSVParser struct {
-	ctx                context.Context            // for canceling parse process
-	collectionInfo     *CollectionInfo            // collection details including schema
-	bufRowCount        int                        // max rows in a buffer
-	fieldsName         []string                   // fieldsName(header name) in the csv file
-	dynamicDataType    map[string]DynamicDataType // data type for each dynamic field
-	updateProgressFunc func(percent int64)        // update working progress percent value
+	ctx                context.Context     // for canceling parse process
+	collectionInfo     *CollectionInfo     // collection details including schema
+	bufRowCount        int                 // max rows in a buffer
+	fieldsName         []string            // fieldsName(header name) in the csv file
+	updateProgressFunc func(percent int64) // update working progress percent value
 }
 
 func NewCSVParser(ctx context.Context, collectionInfo *CollectionInfo, updateProgressFunc func(percent int64)) (*CSVParser, error) {
@@ -65,9 +53,6 @@ func NewCSVParser(ctx context.Context, collectionInfo *CollectionInfo, updatePro
 		bufRowCount:        1024,
 		fieldsName:         make([]string, 0),
 		updateProgressFunc: updateProgressFunc,
-	}
-	if collectionInfo.DynamicField != nil {
-		parser.dynamicDataType = make(map[string]DynamicDataType)
 	}
 	parser.SetBufSize()
 	return parser, nil
@@ -93,32 +78,6 @@ func (p *CSVParser) SetBufSize() {
 	}
 	log.Info("CSV parser: reset bufRowCount", zap.Int("sizePerRecord", sizePerRecord), zap.Int("bufRowCount", bufRowCount))
 	p.bufRowCount = bufRowCount
-}
-
-func (p *CSVParser) typeInference(dynamicValues map[string]string) error {
-	if p.dynamicDataType == nil {
-		return errors.New("CSV parser: dynamicDataType is nil")
-	}
-
-	for k, v := range dynamicValues {
-		var value interface{}
-		if err := json.Unmarshal([]byte(v), &value); err != nil {
-			// Unmarshal a string will cause error
-			p.dynamicDataType[k] = StringType
-			continue
-		}
-
-		if _, ok := value.(float64); ok {
-			p.dynamicDataType[k] = NumberType
-		} else if _, ok := value.([]interface{}); ok {
-			p.dynamicDataType[k] = ArrayType
-		} else if _, ok := value.(map[string]interface{}); ok {
-			p.dynamicDataType[k] = JSONType
-		} else if _, ok := value.(bool); ok {
-			p.dynamicDataType[k] = BoolType
-		}
-	}
-	return nil
 }
 
 func (p *CSVParser) combineDynamicRow(dynamicValues map[string]string, row map[storage.FieldID]string) error {
@@ -151,57 +110,31 @@ func (p *CSVParser) combineDynamicRow(dynamicValues map[string]string, row map[s
 			}
 		}
 		// case 4
-		// use first row to inference dynamic field data type
-		if len(p.dynamicDataType) == 0 {
-			if err := p.typeInference(dynamicValues); err != nil {
-				return err
-			}
-		}
 		for k, v := range dynamicValues {
-			switch p.dynamicDataType[k] {
-			case NumberType:
-				var dummy float64
-				if err := json.Unmarshal([]byte(v), &dummy); err != nil {
-					log.Warn("CSV parser: illegal value for number type dynamic field", zap.String("value", v), zap.String("field", k))
-					return fmt.Errorf("illegal value '%v' for number type dynamic field '%s'", v, k)
-				}
+			var value interface{}
 
-				mp[k] = json.Number(v)
-			case StringType:
+			desc := json.NewDecoder(strings.NewReader(v))
+			desc.UseNumber()
+			if err := desc.Decode(&value); err != nil {
+				// Decode a string will cause error, like "abcd"
 				mp[k] = v
-			case ArrayType:
-				desc := json.NewDecoder(strings.NewReader(v))
-				desc.UseNumber()
-
-				var arr []interface{}
-				if err := desc.Decode(&arr); err != nil {
-					log.Warn("CSV parser: illegal value for array type dynamic field", zap.String("value", v), zap.String("field", k))
-					return fmt.Errorf("illegal value '%v' for array type dynamic field '%s'", v, k)
-				}
-
-				mp[k] = arr
-			case JSONType:
-				desc := json.NewDecoder(strings.NewReader(v))
-				desc.UseNumber()
-
-				var obj map[string]interface{}
-				if err := desc.Decode(&obj); err != nil {
-					log.Warn("CSV parser: illegal value for json type dynamic field", zap.String("value", v), zap.String("field", k))
-					return fmt.Errorf("illegal value '%v' for json type dynamic field '%s'", v, k)
-				}
-
-				mp[k] = obj
-			case BoolType:
-				var obj bool
-				// no concern about number accuracy
-				if err := json.Unmarshal([]byte(v), &obj); err != nil {
-					log.Warn("CSV parser: illegal value for bool type dynamic field", zap.String("value", v), zap.String("field", k))
-					return fmt.Errorf("illegal value '%v' for bool type dynamic field '%s'", v, k)
-				}
-
-				mp[k] = obj
+				continue
 			}
 
+			if num, ok := value.(json.Number); ok {
+				// Decode may convert "123ab" to 123, so need additional check
+				if _, err := strconv.ParseFloat(v, 64); err != nil {
+					mp[k] = v
+				} else {
+					mp[k] = num
+				}
+			} else if arr, ok := value.([]interface{}); ok {
+				mp[k] = arr
+			} else if obj, ok := value.(map[string]interface{}); ok {
+				mp[k] = obj
+			} else if b, ok := value.(bool); ok {
+				mp[k] = b
+			}
 		}
 		bs, err := json.Marshal(mp)
 		if err != nil {
